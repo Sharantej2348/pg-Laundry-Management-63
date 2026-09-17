@@ -265,7 +265,6 @@ function MachineCard({
     onRemoveClothes,
     onToggleNotify,
     onTestAlarm,
-    onOpenCancel,
     onOpenExtend,
     onOpenOutOfOrder,
     onOpenMarkWorking,
@@ -360,12 +359,6 @@ function MachineCard({
                             onClick={() => onOpenExtend(machine.id)}
                         >
                             Extend time
-                        </button>
-                        <button
-                            className="lm-btn-link lm-btn-link-danger"
-                            onClick={() => onOpenCancel(machine.id)}
-                        >
-                            Cancel wash
                         </button>
                     </div>
                 </>
@@ -999,20 +992,13 @@ export default function App() {
 
     const handleTestAlarm = () => alarm.testBeep();
 
-    const handleOpenCancel = (machineId) =>
-        setConfirmDialog({ type: "cancelWash", machineId });
     const handleOpenMarkWorking = (machineId) =>
         setConfirmDialog({ type: "markWorking", machineId });
 
     const handleConfirmDialogAccept = () => {
         if (!confirmDialog) return;
         const { type, machineId } = confirmDialog;
-        if (type === "cancelWash")
-            setMachineAvailableWithUndo(
-                machineId,
-                `${LABEL_BY_ID[machineId]} wash cancelled.`,
-            );
-        else if (type === "markWorking")
+        if (type === "markWorking")
             setMachineAvailableWithUndo(
                 machineId,
                 `${LABEL_BY_ID[machineId]} marked available.`,
@@ -1120,7 +1106,6 @@ export default function App() {
                             onRemoveClothes={handleRemoveClothes}
                             onToggleNotify={handleToggleNotify}
                             onTestAlarm={handleTestAlarm}
-                            onOpenCancel={handleOpenCancel}
                             onOpenExtend={handleOpenExtend}
                             onOpenOutOfOrder={handleOpenOutOfOrder}
                             onOpenMarkWorking={handleOpenMarkWorking}
@@ -1156,17 +1141,6 @@ export default function App() {
                     machine={outOfOrderMachine}
                     onCancel={() => setOutOfOrderMachineId(null)}
                     onConfirm={handleConfirmOutOfOrder}
-                />
-            )}
-
-            {confirmDialog?.type === "cancelWash" && (
-                <ConfirmModal
-                    title="Cancel this wash?"
-                    message={`${LABEL_BY_ID[confirmDialog.machineId]} will be marked available for someone else right away.`}
-                    confirmLabel="Cancel wash"
-                    danger
-                    onCancel={() => setConfirmDialog(null)}
-                    onConfirm={handleConfirmDialogAccept}
                 />
             )}
 
