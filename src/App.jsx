@@ -266,6 +266,7 @@ function MachineCard({
     onToggleNotify,
     onTestAlarm,
     onOpenExtend,
+    onOpenCancelWash,
     onOpenOutOfOrder,
     onOpenMarkWorking,
 }) {
@@ -359,6 +360,12 @@ function MachineCard({
                             onClick={() => onOpenExtend(machine.id)}
                         >
                             Extend time
+                        </button>
+                        <button
+                            className="lm-btn-link lm-btn-link-danger"
+                            onClick={() => onOpenCancelWash(machine.id)}
+                        >
+                            Cancel wash
                         </button>
                     </div>
                 </>
@@ -833,7 +840,12 @@ export default function App() {
     const undoTimeoutRef = useRef(null);
     const notifyPrefsRef = useRef(notifyPrefs);
     const alarmedCyclesRef = useRef(readLocal(ALARMED_CYCLES_KEY, []));
+    const alarmQueueRef = useRef([]);
+    const alarmDismissChannelRef = useRef(null);
+    const alarmDismissReadyRef = useRef(false);
+    const pendingAlarmDismissalsRef = useRef([]);
     machinesRef.current = machines;
+    alarmQueueRef.current = alarmQueue;
 
     const alarm = useAlarmEngine();
 
@@ -899,6 +911,35 @@ export default function App() {
             applyIncoming(byId);
         })();
 
+        const alarmChannel = supabase
+            .channel("laundry-alarm-dismissals")
+            .on("broadcast", { event: "alarm_dismissed" }, ({ payload }) => {
+                const cycleKey = payload?.cycleKey;
+                if (!cycleKey) return;
+                const wasVisible = alarmQueueRef.current.some(
+                    (item) => item.cycleKey === cycleKey,
+                );
+                if (!wasVisible) return;
+                alarm.stopLoop();
+                setAlarmQueue((queue) =>
+                    queue.filter((item) => item.cycleKey !== cycleKey),
+                );
+            })
+            .subscribe((status) => {
+                alarmDismissReadyRef.current = status === "SUBSCRIBED";
+                if (alarmDismissReadyRef.current) {
+                    const pending = pendingAlarmDismissalsRef.current;
+                    pendingAlarmDismissalsRef.current = [];
+                    for (const cycleKey of pending) {
+                        alarmChannel.send({
+                            type: "broadcast",
+                            event: "alarm_dismissed",
+                            payload: { cycleKey },
+                        });
+                    }
+                }
+            });
+
         const channel = supabase
             .channel("machines-realtime")
             .on(
@@ -921,9 +962,14 @@ export default function App() {
                     setConnectionStatus("reconnecting");
                 }
             });
+        alarmDismissChannelRef.current = alarmChannel;
 
         return () => {
             cancelled = true;
+            alarmDismissReadyRef.current = false;
+            pendingAlarmDismissalsRef.current = [];
+            alarmDismissChannelRef.current = null;
+            supabase.removeChannel(alarmChannel);
             supabase.removeChannel(channel);
         };
     }, [applyIncoming]);
@@ -996,8 +1042,20 @@ export default function App() {
     }, [topCycleKey]);
 
     const dismissAlarm = () => {
+        const item = alarmQueueRef.current[0];
+        if (!item) return;
         alarm.stopLoop();
         setAlarmQueue((q) => q.slice(1));
+        const message = {
+            type: "broadcast",
+            event: "alarm_dismissed",
+            payload: { cycleKey: item.cycleKey },
+        };
+        if (alarmDismissReadyRef.current) {
+            alarmDismissChannelRef.current?.send(message);
+        } else {
+            pendingAlarmDismissalsRef.current.push(item.cycleKey);
+        }
     };
 
     const handleToggleNotify = (machineId) => {
@@ -1052,9 +1110,13 @@ export default function App() {
         setModalMachineId(null);
     };
 
-    const setMachineAvailableWithUndo = async (machineId, undoMessage) => {
+    const setMachineAvailableWithUndo = async (
+        machineId,
+        undoMessage,
+        expectedStatus,
+    ) => {
         const snapshot = machinesRef.current[machineId];
-        await supabase
+        let query = supabase
             .from("machines")
             .update({
                 status: "available",
@@ -1066,6 +1128,8 @@ export default function App() {
                 reported_at: null,
             })
             .eq("id", machineId);
+        if (expectedStatus) query = query.eq("status", expectedStatus);
+        await query;
 
         if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
         setUndoToast({ message: undoMessage, machineId, snapshot });
@@ -1114,10 +1178,19 @@ export default function App() {
                 machineId,
                 `${LABEL_BY_ID[machineId]} marked available.`,
             );
+        if (type === "cancelWash")
+            setMachineAvailableWithUndo(
+                machineId,
+                `${LABEL_BY_ID[machineId]} wash cancelled.`,
+                "washing",
+            );
         setConfirmDialog(null);
     };
 
     const handleOpenExtend = (machineId) => setExtendMachineId(machineId);
+
+    const handleOpenCancelWash = (machineId) =>
+        setConfirmDialog({ type: "cancelWash", machineId });
 
     const handleConfirmExtend = async (minutes) => {
         const target = machinesRef.current[extendMachineId];
@@ -1218,6 +1291,7 @@ export default function App() {
                             onToggleNotify={handleToggleNotify}
                             onTestAlarm={handleTestAlarm}
                             onOpenExtend={handleOpenExtend}
+                            onOpenCancelWash={handleOpenCancelWash}
                             onOpenOutOfOrder={handleOpenOutOfOrder}
                             onOpenMarkWorking={handleOpenMarkWorking}
                         />
@@ -1260,6 +1334,17 @@ export default function App() {
                     title="Mark as working again?"
                     message={`${LABEL_BY_ID[confirmDialog.machineId]} will show as available to everyone.`}
                     confirmLabel="Mark available"
+                    onCancel={() => setConfirmDialog(null)}
+                    onConfirm={handleConfirmDialogAccept}
+                />
+            )}
+
+            {confirmDialog?.type === "cancelWash" && (
+                <ConfirmModal
+                    title="Cancel this wash?"
+                    message={`${LABEL_BY_ID[confirmDialog.machineId]} will become available again.`}
+                    confirmLabel="Cancel wash"
+                    danger
                     onCancel={() => setConfirmDialog(null)}
                     onConfirm={handleConfirmDialogAccept}
                 />
