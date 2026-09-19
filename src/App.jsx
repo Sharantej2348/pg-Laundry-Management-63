@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Bell, BellOff } from "lucide-react";
+import { X, Bell, BellOff, ChevronUp, ChevronDown } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 import "./styles.css";
 
@@ -412,27 +412,62 @@ function MachineCard({
     );
 }
 
-const DURATION_PRESETS = [30, 45, 60, 90];
+function TimeWheel({ label, value, max, onChange }) {
+    const cycle = (nextValue) => {
+        if (nextValue < 0) return max;
+        if (nextValue > max) return 0;
+        return nextValue;
+    };
+    const values = [cycle(value - 1), value, cycle(value + 1)];
+
+    return (
+        <div className="lm-time-wheel">
+            <span className="lm-time-wheel-label">{label}</span>
+            <button
+                className="lm-time-wheel-step"
+                onClick={() => onChange(cycle(value - 1))}
+                aria-label={`Decrease ${label}`}
+            >
+                <ChevronUp size={15} />
+            </button>
+            <div className="lm-time-wheel-values">
+                {values.map((wheelValue, index) => (
+                    <button
+                        key={`${label}-${index}-${wheelValue}`}
+                        className={`lm-time-wheel-value ${index === 1 ? "lm-time-wheel-current" : ""}`}
+                        onClick={() => onChange(wheelValue)}
+                    >
+                        {String(wheelValue).padStart(2, "0")}
+                    </button>
+                ))}
+            </div>
+            <button
+                className="lm-time-wheel-step"
+                onClick={() => onChange(cycle(value + 1))}
+                aria-label={`Increase ${label}`}
+            >
+                <ChevronDown size={15} />
+            </button>
+        </div>
+    );
+}
 
 function StartWashModal({ machine, onCancel, onConfirm, submitting }) {
-    const [selectedPreset, setSelectedPreset] = useState(30);
-    const [useCustom, setUseCustom] = useState(false);
-    const [customMinutes, setCustomMinutes] = useState("");
+    const [hours, setHours] = useState(0);
+    const [minutes, setMinutes] = useState(0);
+    const [seconds, setSeconds] = useState(0);
     const [name, setName] = useState("");
     const [room, setRoom] = useState("");
     const [error, setError] = useState("");
 
-    const effectiveMinutes = useCustom
-        ? parseInt(customMinutes, 10)
-        : selectedPreset;
+    const durationSeconds = hours * 3600 + minutes * 60 + seconds;
+    const effectiveMinutes = Math.ceil(durationSeconds / 60);
     const isValid =
-        Number.isFinite(effectiveMinutes) &&
-        effectiveMinutes > 0 &&
-        effectiveMinutes <= MAX_CUSTOM_MINUTES;
+        durationSeconds > 0 && effectiveMinutes <= MAX_CUSTOM_MINUTES;
 
     const handleStart = () => {
-        if (!Number.isFinite(effectiveMinutes) || effectiveMinutes <= 0) {
-            setError("Enter a duration greater than 0 minutes.");
+        if (!durationSeconds) {
+            setError("Choose a duration greater than 0 minutes.");
             return;
         }
         if (effectiveMinutes > MAX_CUSTOM_MINUTES) {
@@ -462,52 +497,44 @@ function StartWashModal({ machine, onCancel, onConfirm, submitting }) {
                 </div>
 
                 <p className="lm-sheet-label">Washing duration</p>
-                <div className="lm-preset-row">
-                    {DURATION_PRESETS.map((mins) => (
-                        <button
-                            key={mins}
-                            className={`lm-preset-btn ${!useCustom && selectedPreset === mins ? "lm-preset-active" : ""}`}
-                            onClick={() => {
-                                setUseCustom(false);
-                                setSelectedPreset(mins);
-                                setError("");
-                            }}
-                        >
-                            {mins}m
-                        </button>
-                    ))}
-                    <button
-                        className={`lm-preset-btn ${useCustom ? "lm-preset-active" : ""}`}
-                        onClick={() => {
-                            setUseCustom(true);
-                            setError("");
-                        }}
+                <div className="lm-duration-panel">
+                    <div className="lm-time-readout">
+                        <span>Timer</span>
+                        <strong>
+                            {String(hours).padStart(2, "0")}:
+                            {String(minutes).padStart(2, "0")}:
+                            {String(seconds).padStart(2, "0")}
+                        </strong>
+                    </div>
+                    <div
+                        className="lm-time-wheels"
+                        aria-label="Choose washing duration"
                     >
-                        Custom
-                    </button>
-                </div>
-
-                {useCustom && (
-                    <>
-                        <input
-                            className="lm-input"
-                            type="number"
-                            inputMode="numeric"
-                            min="1"
-                            max={MAX_CUSTOM_MINUTES}
-                            placeholder="Minutes"
-                            value={customMinutes}
-                            onChange={(e) => {
-                                setCustomMinutes(e.target.value);
-                                setError("");
-                            }}
-                            autoFocus
+                        <TimeWheel
+                            label="Hours"
+                            value={hours}
+                            max={4}
+                            onChange={setHours}
                         />
-                        <p className="lm-sheet-hint" style={{ marginTop: 6 }}>
-                            Up to {MAX_CUSTOM_MINUTES} minutes.
-                        </p>
-                    </>
-                )}
+                        <TimeWheel
+                            label="Minutes"
+                            value={minutes}
+                            max={59}
+                            onChange={setMinutes}
+                        />
+                        <TimeWheel
+                            label="Seconds"
+                            value={seconds}
+                            max={59}
+                            onChange={setSeconds}
+                        />
+                    </div>
+                    <p className="lm-duration-selected">
+                        {isValid
+                            ? `Wash duration: ${effectiveMinutes} minute${effectiveMinutes === 1 ? "" : "s"}`
+                            : "Choose a duration to continue"}
+                    </p>
+                </div>
 
                 <p className="lm-sheet-label lm-sheet-label-spaced">
                     Who's using this machine? (optional)
@@ -551,9 +578,15 @@ function StartWashModal({ machine, onCancel, onConfirm, submitting }) {
     );
 }
 
-const EXTEND_PRESETS = [10, 15, 30];
-
 function ExtendModal({ machine, onCancel, onConfirm }) {
+    const [hours, setHours] = useState(0);
+    const [minutes, setMinutes] = useState(0);
+    const [seconds, setSeconds] = useState(0);
+    const durationSeconds = hours * 3600 + minutes * 60 + seconds;
+    const effectiveMinutes = Math.ceil(durationSeconds / 60);
+    const isValid =
+        durationSeconds > 0 && effectiveMinutes <= MAX_CUSTOM_MINUTES;
+
     return (
         <div className="lm-sheet-backdrop" onClick={onCancel}>
             <div className="lm-sheet" onClick={(e) => e.stopPropagation()}>
@@ -569,26 +602,57 @@ function ExtendModal({ machine, onCancel, onConfirm }) {
                     </button>
                 </div>
                 <p className="lm-sheet-label">Add time to the current wash</p>
-                <div
-                    className="lm-preset-row"
-                    style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
-                >
-                    {EXTEND_PRESETS.map((mins) => (
-                        <button
-                            key={mins}
-                            className="lm-preset-btn"
-                            onClick={() => onConfirm(mins)}
-                        >
-                            +{mins}m
-                        </button>
-                    ))}
+                <div className="lm-duration-panel">
+                    <div className="lm-time-readout">
+                        <span>Added time</span>
+                        <strong>
+                            {String(hours).padStart(2, "0")}:
+                            {String(minutes).padStart(2, "0")}:
+                            {String(seconds).padStart(2, "0")}
+                        </strong>
+                    </div>
+                    <div
+                        className="lm-time-wheels"
+                        aria-label="Choose additional washing time"
+                    >
+                        <TimeWheel
+                            label="Hours"
+                            value={hours}
+                            max={4}
+                            onChange={setHours}
+                        />
+                        <TimeWheel
+                            label="Minutes"
+                            value={minutes}
+                            max={59}
+                            onChange={setMinutes}
+                        />
+                        <TimeWheel
+                            label="Seconds"
+                            value={seconds}
+                            max={59}
+                            onChange={setSeconds}
+                        />
+                    </div>
+                    <p className="lm-duration-selected">
+                        {isValid
+                            ? `Add ${effectiveMinutes} minute${effectiveMinutes === 1 ? "" : "s"} to this wash`
+                            : "Choose additional time to continue"}
+                    </p>
                 </div>
                 <p className="lm-sheet-hint">
                     New finish time updates for everyone within a second or two.
                 </p>
                 <div className="lm-sheet-actions">
-                    <button className="lm-btn lm-btn-ghost" onClick={onCancel}>
-                        Never mind
+                    <button className="lm-btn lm-btn-danger" onClick={onCancel}>
+                        Cancel
+                    </button>
+                    <button
+                        className="lm-btn lm-btn-primary"
+                        onClick={() => onConfirm(effectiveMinutes)}
+                        disabled={!isValid}
+                    >
+                        Add time
                     </button>
                 </div>
             </div>
