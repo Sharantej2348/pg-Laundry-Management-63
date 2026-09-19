@@ -413,12 +413,50 @@ function MachineCard({
 }
 
 function TimeWheel({ label, value, max, onChange }) {
+    const dragStartY = useRef(null);
+    const dragStartValue = useRef(value);
+    const lastDragStep = useRef(0);
+    const dragMoved = useRef(false);
+
     const cycle = (nextValue) => {
         if (nextValue < 0) return max;
         if (nextValue > max) return 0;
         return nextValue;
     };
     const values = [cycle(value - 1), value, cycle(value + 1)];
+
+    const handlePointerDown = (event) => {
+        dragStartY.current = event.clientY;
+        dragStartValue.current = value;
+        lastDragStep.current = 0;
+        dragMoved.current = false;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerMove = (event) => {
+        if (dragStartY.current === null) return;
+        const distance = dragStartY.current - event.clientY;
+        const step = Math.trunc(distance / 18);
+        if (step === lastDragStep.current) return;
+        lastDragStep.current = step;
+        dragMoved.current = step !== 0;
+        onChange(cycle(dragStartValue.current + step));
+    };
+
+    const handlePointerEnd = (event) => {
+        if (
+            event.currentTarget.hasPointerCapture &&
+            event.currentTarget.hasPointerCapture(event.pointerId)
+        ) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        dragStartY.current = null;
+    };
+
+    const handleWheel = (event) => {
+        event.preventDefault();
+        onChange(cycle(value + (event.deltaY > 0 ? -1 : 1)));
+    };
 
     return (
         <div className="lm-time-wheel">
@@ -430,12 +468,21 @@ function TimeWheel({ label, value, max, onChange }) {
             >
                 <ChevronUp size={15} />
             </button>
-            <div className="lm-time-wheel-values">
+            <div
+                className="lm-time-wheel-values"
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerEnd}
+                onPointerCancel={handlePointerEnd}
+                onWheel={handleWheel}
+            >
                 {values.map((wheelValue, index) => (
                     <button
                         key={`${label}-${index}-${wheelValue}`}
                         className={`lm-time-wheel-value ${index === 1 ? "lm-time-wheel-current" : ""}`}
-                        onClick={() => onChange(wheelValue)}
+                        onClick={() => {
+                            if (!dragMoved.current) onChange(wheelValue);
+                        }}
                     >
                         {String(wheelValue).padStart(2, "0")}
                     </button>
@@ -562,7 +609,7 @@ function StartWashModal({ machine, onCancel, onConfirm, submitting }) {
                 {error && <p className="lm-error">{error}</p>}
 
                 <div className="lm-sheet-actions">
-                    <button className="lm-btn lm-btn-ghost" onClick={onCancel}>
+                    <button className="lm-btn lm-btn-danger" onClick={onCancel}>
                         Cancel
                     </button>
                     <button
